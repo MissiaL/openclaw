@@ -242,6 +242,17 @@ jq '"'"'. * {"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-
 '
 
 # =========================
+# VALIDATE CONFIGURATION
+# =========================
+
+log "Validating configuration..."
+
+su - "${USERNAME}" -c '
+export PATH="$HOME/.npm-global/bin:$PATH"
+$HOME/.npm-global/bin/openclaw doctor --yes --repair
+'
+
+# =========================
 # SUMMARY
 # =========================
 
