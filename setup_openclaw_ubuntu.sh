@@ -250,7 +250,7 @@ log "Validating configuration..."
 su - "${USERNAME}" -c '
 export PATH="$HOME/.npm-global/bin:$PATH"
 $HOME/.npm-global/bin/openclaw doctor --yes --repair
-'
+' >/dev/null 2>&1
 
 # =========================
 # SUMMARY
