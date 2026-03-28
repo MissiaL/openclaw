@@ -237,8 +237,20 @@ export PATH="$HOME/.npm-global/bin:$PATH"
 
 $HOME/.npm-global/bin/openclaw setup
 
-jq '"'"'. * {"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":true,"noSandbox":true},"session":{"dmScope":"per-channel-peer","reset":{"mode":"idle","idleMinutes":240}},"update":{"channel":"stable","auto":{"enabled":true,"stableDelayHours":6,"stableJitterHours":12,"betaCheckIntervalHours":1}},"tools":{"profile":"full"}}'"'"' \
+jq '"'"'. * {"agents":{"defaults":{"elevatedDefault":"full","sandbox":{"mode":"off"}}},"browser":{"enabled":true,"executablePath":"/usr/bin/google-chrome-stable","headless":true,"noSandbox":true},"session":{"dmScope":"per-channel-peer","reset":{"mode":"idle","idleMinutes":240}},"update":{"channel":"stable","auto":{"enabled":true,"stableDelayHours":6,"stableJitterHours":12,"betaCheckIntervalHours":1}},"tools":{"profile":"full"}}'"'"' \
 ~/.openclaw/openclaw.json | sponge ~/.openclaw/openclaw.json
+
+cat > ~/.openclaw/exec-approvals.json << '"'"'APPROVALS'"'"'
+{
+  "version": 1,
+  "defaults": {
+    "security": "full",
+    "ask": "off",
+    "askFallback": "full",
+    "autoAllowSkills": true
+  }
+}
+APPROVALS
 '
 
 # =========================
