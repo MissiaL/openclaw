@@ -35,6 +35,16 @@ is_amd64() {
   [[ "$(dpkg --print-architecture)" == "amd64" ]]
 }
 
+is_wsl() {
+  grep -qiE '(microsoft|wsl)' /proc/version 2>/dev/null || \
+    grep -qiE '(microsoft|wsl)' /proc/sys/kernel/osrelease 2>/dev/null
+}
+
+has_systemd() {
+  [[ -d /run/systemd/system ]] && systemctl is-system-running >/dev/null 2>&1 || \
+    [[ "$(ps -p 1 -o comm= 2>/dev/null)" == "systemd" ]]
+}
+
 require_root
 export DEBIAN_FRONTEND=noninteractive
 
@@ -105,49 +115,70 @@ fi
 # FIREWALL
 # =========================
 
-log "Configuring firewall..."
+if is_wsl; then
+  warn "WSL detected — skipping UFW (firewall is managed by Windows host)."
+else
+  log "Configuring firewall..."
 
-ufw allow OpenSSH >/dev/null
-ufw --force enable >/dev/null
+  # Ensure OpenSSH server is installed so the UFW profile exists.
+  if ! dpkg -s openssh-server >/dev/null 2>&1; then
+    apt-get -o Dpkg::Use-Pty=0 install -y --no-install-recommends openssh-server || true
+  fi
+
+  if ufw app list 2>/dev/null | grep -q '^  OpenSSH$\|OpenSSH'; then
+    ufw allow OpenSSH >/dev/null
+  else
+    warn "OpenSSH UFW profile not found — falling back to port 22/tcp."
+    ufw allow 22/tcp >/dev/null
+  fi
+  ufw --force enable >/dev/null
+fi
 
 # =========================
 # FAIL2BAN
 # =========================
 
-log "Starting fail2ban..."
-
-systemctl enable fail2ban
-systemctl restart fail2ban
+if has_systemd; then
+  log "Starting fail2ban..."
+  systemctl enable fail2ban
+  systemctl restart fail2ban
+else
+  warn "systemd not active — skipping fail2ban (likely WSL without systemd)."
+fi
 
 # =========================
 # SWAP
 # =========================
 
-log "Configuring swap..."
+if is_wsl; then
+  warn "WSL detected — skipping swap setup (managed by Windows host via .wslconfig)."
+else
+  log "Configuring swap..."
 
-SWAPFILE="/swapfile"
-TARGET_SWAP_MB=$((SWAP_DEFAULT_GB * 1024))
-CURRENT_SWAP_MB="$(get_swap_mb)"
+  SWAPFILE="/swapfile"
+  TARGET_SWAP_MB=$((SWAP_DEFAULT_GB * 1024))
+  CURRENT_SWAP_MB="$(get_swap_mb)"
 
-if [[ "${CURRENT_SWAP_MB}" -lt "${TARGET_SWAP_MB}" ]]; then
+  if [[ "${CURRENT_SWAP_MB}" -lt "${TARGET_SWAP_MB}" ]]; then
 
-  swapoff "${SWAPFILE}" 2>/dev/null || true
-  rm -f "${SWAPFILE}"
+    swapoff "${SWAPFILE}" 2>/dev/null || true
+    rm -f "${SWAPFILE}"
 
-  if ! fallocate -l "${SWAP_DEFAULT_GB}G" "${SWAPFILE}" 2>/dev/null; then
-    warn "fallocate failed, using dd..."
-    dd if=/dev/zero of="${SWAPFILE}" bs=1M count="${TARGET_SWAP_MB}" status=progress
+    if ! fallocate -l "${SWAP_DEFAULT_GB}G" "${SWAPFILE}" 2>/dev/null; then
+      warn "fallocate failed, using dd..."
+      dd if=/dev/zero of="${SWAPFILE}" bs=1M count="${TARGET_SWAP_MB}" status=progress
+    fi
+
+    chmod 600 "${SWAPFILE}"
+    mkswap "${SWAPFILE}" >/dev/null
+    swapon "${SWAPFILE}"
+
+    grep -q "${SWAPFILE}" /etc/fstab || echo "${SWAPFILE} none swap sw 0 0" >> /etc/fstab
   fi
 
-  chmod 600 "${SWAPFILE}"
-  mkswap "${SWAPFILE}" >/dev/null
-  swapon "${SWAPFILE}"
-
-  grep -q "${SWAPFILE}" /etc/fstab || echo "${SWAPFILE} none swap sw 0 0" >> /etc/fstab
+  sysctl -w "vm.swappiness=${SWAPPINESS}" >/dev/null 2>&1 || true
+  echo "vm.swappiness=${SWAPPINESS}" > /etc/sysctl.d/99-swappiness.conf
 fi
-
-sysctl -w "vm.swappiness=${SWAPPINESS}" >/dev/null
-echo "vm.swappiness=${SWAPPINESS}" > /etc/sysctl.d/99-swappiness.conf
 
 # =========================
 # HOMEBREW
@@ -270,7 +301,11 @@ $HOME/.npm-global/bin/openclaw doctor --yes --repair --non-interactive
 
 log "Setup complete."
 
-SERVER_IP="$(curl -s --max-time 5 ifconfig.me || hostname -I | awk '{print $1}')"
+if is_wsl; then
+  SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+else
+  SERVER_IP="$(curl -s --max-time 5 ifconfig.me || hostname -I | awk '{print $1}')"
+fi
 
 echo
 echo "====== SUMMARY ======"
@@ -288,9 +323,12 @@ fi
 echo
 echo "Swap: $(get_swap_mb) MB"
 echo "Claude: $(su - ${USERNAME} -c 'export PATH=$HOME/.local/bin:$PATH; command -v claude >/dev/null 2>&1 && claude --version || echo not-detected')"
-echo
-echo "SSH:"
-echo "ssh ${USERNAME}@${SERVER_IP}"
+
+if ! is_wsl; then
+  echo
+  echo "SSH:"
+  echo "ssh ${USERNAME}@${SERVER_IP}"
+fi
 
 # Marker file for cloud-init: check with `ls /root/.openclaw_setup_done`
 touch "${SETUP_MARKER}"
