@@ -112,6 +112,41 @@ if [[ "${USER_CREATED}" == "yes" ]]; then
 fi
 
 # =========================
+# WSL2: ENABLE SYSTEMD
+# =========================
+
+if is_wsl; then
+  WSL_CONF="/etc/wsl.conf"
+  if ! grep -q '^\[boot\]' "${WSL_CONF}" 2>/dev/null || \
+     ! grep -q '^systemd=true' "${WSL_CONF}" 2>/dev/null; then
+    log "Enabling systemd for WSL2..."
+
+    # Ensure [boot] section with systemd=true exists
+    if [[ -f "${WSL_CONF}" ]] && grep -q '^\[boot\]' "${WSL_CONF}"; then
+      # [boot] section exists — add or replace systemd line
+      if grep -q '^systemd=' "${WSL_CONF}"; then
+        sed -i 's/^systemd=.*/systemd=true/' "${WSL_CONF}"
+      else
+        sed -i '/^\[boot\]/a systemd=true' "${WSL_CONF}"
+      fi
+    else
+      # Append [boot] section
+      printf '\n[boot]\nsystemd=true\n' >> "${WSL_CONF}"
+    fi
+
+    warn "systemd has been enabled in ${WSL_CONF}."
+    warn "Run 'wsl --shutdown' from PowerShell after this script finishes, then reopen WSL."
+  else
+    log "systemd already enabled in ${WSL_CONF}."
+  fi
+
+  # Enable user service lingering so openclaw-gateway runs after logout
+  if command -v loginctl >/dev/null 2>&1 && has_systemd; then
+    loginctl enable-linger "${USERNAME}" 2>/dev/null || true
+  fi
+fi
+
+# =========================
 # FIREWALL
 # =========================
 
@@ -324,7 +359,14 @@ echo
 echo "Swap: $(get_swap_mb) MB"
 echo "Claude: $(su - ${USERNAME} -c 'export PATH=$HOME/.local/bin:$PATH; command -v claude >/dev/null 2>&1 && claude --version || echo not-detected')"
 
-if ! is_wsl; then
+if is_wsl; then
+  if ! has_systemd; then
+    echo
+    echo "⚠️  systemd включён в /etc/wsl.conf, но ещё не активен."
+    echo "Выполните в PowerShell: wsl --shutdown"
+    echo "Затем снова откройте WSL."
+  fi
+else
   echo
   echo "SSH:"
   echo "ssh ${USERNAME}@${SERVER_IP}"
